@@ -130,6 +130,10 @@
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
+select.form-input {
+  cursor: pointer;
+}
+
 .form-input::placeholder {
   color: #8d8585;
   opacity: 0.85;

@@ -12,6 +12,7 @@ export interface AuthenticatedUser {
   name: string;
   email: string;
   role: UserRole;
+  universityAdmin: boolean;
 }
 
 export const SESSION_COOKIE = 'archpath_session';
@@ -111,7 +112,12 @@ export async function getAuthenticatedUser(
   );
   const user = result.rows[0];
   if (!user || user.role !== payload.role) return null;
-  return user;
+  return {
+    ...user,
+    universityAdmin:
+      Boolean(process.env.UNIVERSITY_ADMIN_EMAIL) &&
+      user.email.toLowerCase() === process.env.UNIVERSITY_ADMIN_EMAIL?.trim().toLowerCase(),
+  };
 }
 
 export async function revokeSession(request: NextRequest): Promise<void> {
