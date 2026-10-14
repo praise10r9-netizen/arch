@@ -1,5 +1,11 @@
 # 🎨 Configuration Reference
 
+## University Registration and Email
+
+Set `UNIVERSITY_ADMIN_EMAIL` to the exact email address used by the university administrator's login. For a fresh installation, create that account once with `UNIVERSITY_ADMIN_BOOTSTRAP_PASSWORD` set temporarily and run `bun run admin:create`; the command will not overwrite an existing account.
+
+Configure `APP_URL` and either `RESEND_API_KEY` plus `EMAIL_FROM`, or SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `EMAIL_FROM`) to enable review notifications and approval links. Gmail SMTP requires Google 2-Step Verification and an App Password from https://myaccount.google.com/apppasswords; do not use your normal Gmail password. `APP_URL` must be an absolute URL and must use HTTPS in production. Approved links expire after 48 hours and can be used once; approving an already-approved request issues a fresh link if delivery needs to be retried.
+
 ## Color Scheme Configuration
 
 All colors are defined as CSS variables in `app/globals.css`. You can easily customize them by modifying the `:root` section.

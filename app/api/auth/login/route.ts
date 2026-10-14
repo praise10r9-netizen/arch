@@ -47,8 +47,11 @@ export async function POST(request: NextRequest) {
     }
 
     const token = await createSessionToken(user.id, user.role);
+    const universityAdmin =
+      Boolean(process.env.UNIVERSITY_ADMIN_EMAIL) &&
+      user.email.toLowerCase() === process.env.UNIVERSITY_ADMIN_EMAIL?.trim().toLowerCase();
     const response = NextResponse.json({
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, universityAdmin },
     });
     setSessionCookie(response, token);
     return response;

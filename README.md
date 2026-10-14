@@ -5,12 +5,17 @@ ArchPath is a trainee experience log built with Next.js and PostgreSQL.
 ## Local setup
 
 1. Create a PostgreSQL database and a database user with permission to create tables.
-2. Copy `.env.example` to `.env`, set `DATABASE_URL`, and generate a unique `JWT_SECRET` with at least 32 random bytes.
+2. Copy `.env.example` to `.env`, set `DATABASE_URL`, generate a unique `JWT_SECRET` with at least 32 random bytes, and configure the university email settings below.
 3. Install dependencies with `bun install`.
 4. Apply the schema with `bun run db:migrate`.
-5. Start the app with `bun run dev`.
+5. Create the first administrator account with `UNIVERSITY_ADMIN_BOOTSTRAP_PASSWORD` set in the command's environment, then remove that temporary variable.
+6. Start the app with `bun run dev`.
 
-The first account created is a trainee by default. Registration offers an explicit mentor option. Passwords are stored as bcrypt hashes, not reversible encrypted text. Authenticated sessions use signed JWTs in an HTTP-only cookie and are checked against the PostgreSQL session and current user role on each protected request.
+Student and graduate registration creates a university review request, not an account or session. Applicants provide their registration number and school email; the administrator verifies those details and approves or rejects the request from `/university-admin`. Approval sends a one-time, 48-hour setup link. The applicant sets a password through that link and is signed in only after the activation transaction succeeds. Public mentor signup is disabled; existing mentor accounts remain usable and new mentor accounts must be provisioned by the university.
+
+Set `UNIVERSITY_ADMIN_EMAIL` to the administrator's account email. Configure `APP_URL` and either Resend (`RESEND_API_KEY` plus `EMAIL_FROM`) or SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `EMAIL_FROM`) for request notifications and approval links. Use an `APP_URL` on HTTPS in production. For Gmail SMTP, enable 2-Step Verification on the sender's Google account, create an App Password at https://myaccount.google.com/apppasswords, and set it as `SMTP_PASS`; do not use the normal Gmail password. Use the same Gmail address for `SMTP_USER` and `EMAIL_FROM` unless the sender has configured an allowed alias. To bootstrap a fresh installation, set `UNIVERSITY_ADMIN_BOOTSTRAP_PASSWORD` temporarily and run `bun run admin:create`; the command creates a mentor-role login for `UNIVERSITY_ADMIN_EMAIL`, which is authorized for university administration by the exact configured email match. It refuses to overwrite an existing account. Remove the bootstrap password from the environment after use. Passwords are stored as bcrypt hashes, not reversible encrypted text. Authenticated sessions use signed JWTs in an HTTP-only cookie and are checked against the PostgreSQL session and current user role on each protected request.
+
+The administrator dashboard separates pending/approved invitations, registered attachment students, and registered graduates in the two-year training program. Student rows show uploaded attachment counts and graduate rows show submitted training-entry counts. Legacy trainee profiles migrate as graduate-training profiles; update `trainee_profiles.program_type` and `registration_number` manually if existing records need different classifications.
 
 Experience entries belong to the signed-in trainee. Each pending experience log can have one JPEG, PNG, or WebP evidence image; certificates accept up to two PDF/JPEG/PNG/WebP files on the trainee record. Each file is limited to 5 MB and is stored in PostgreSQL. Evidence files are associated with a log and can be opened by the trainee's assigned mentor through a private link; the review screen does not fetch file bytes until the mentor opens that link. Certificates remain trainee-level files.
 
@@ -58,5 +63,6 @@ The MVP verifier currently trusts one configured public key. Keep its key id and
 - `bun run lint` — run ESLint.
 - `bun run build` — build the production app.
 - `bun run db:migrate` — apply any unapplied SQL migrations.
+- `bun run admin:create` — create the configured university administrator account once.
 - `bun run approvals:verify` — verify signed approval records against the configured public key.
 - `bun run test:approval-flow` — exercise save, assignment, approval signing, verification, and immutability inside a temporary PostgreSQL schema.

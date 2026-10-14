@@ -109,7 +109,7 @@ export default function TraineeWorkspace() {
       })
       .finally(() => {
         if (mounted) setIsLoading(false);
-      });
+      }); 
     return () => {
       mounted = false;
     };

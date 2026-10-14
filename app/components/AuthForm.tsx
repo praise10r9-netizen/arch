@@ -10,7 +10,8 @@ interface AuthFormProps {
 }
 
 interface AuthResponse {
-  user?: { role: 'trainee' | 'mentor' };
+  user?: { role: 'trainee' | 'mentor'; universityAdmin?: boolean };
+  applicationSubmitted?: boolean;
   message?: string;
 }
 
@@ -20,23 +21,15 @@ export default function AuthForm({ mode }: AuthFormProps) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [registerAsMentor, setRegisterAsMentor] = useState(false);
+  const [registrationNumber, setRegistrationNumber] = useState('');
+  const [programType, setProgramType] = useState<'student_attachment' | 'graduate_training'>('student_attachment');
   const [formError, setFormError] = useState('');
+  const [submittedMessage, setSubmittedMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError('');
-    if (!isLogin && password !== confirmPassword) {
-      setFormError('Passwords do not match.');
-      return;
-    }
-    if (!isLogin && password.length < 12) {
-      setFormError('Choose a password with at least 12 characters.');
-      return;
-    }
-
     setIsLoading(true);
     try {
       const response = await fetch(isLogin ? '/api/auth/login' : '/api/auth/register', {
@@ -45,19 +38,26 @@ export default function AuthForm({ mode }: AuthFormProps) {
         body: JSON.stringify(
           isLogin
             ? { email, password }
-            : {
-                name,
-                email,
-                password,
-                role: registerAsMentor ? 'mentor' : 'trainee',
-              },
+            : { name, email, registrationNumber, programType, role: 'trainee' },
         ),
       });
       const result = (await response.json()) as AuthResponse;
-      if (!response.ok || !result.user) {
+      if (!response.ok) {
         throw new Error(result.message || 'Authentication failed.');
       }
-      router.replace(result.user.role === 'mentor' ? '/mentor' : '/trainee');
+      if (result.applicationSubmitted) {
+        setSubmittedMessage(result.message || 'Request submitted for university verification.');
+        setIsLoading(false);
+        return;
+      }
+      if (!result.user) throw new Error(result.message || 'Authentication failed.');
+      router.replace(
+        result.user.universityAdmin
+          ? '/university-admin'
+          : result.user.role === 'mentor'
+            ? '/mentor'
+            : '/trainee',
+      );
       router.refresh();
     } catch (error) {
       setFormError(
@@ -76,18 +76,19 @@ export default function AuthForm({ mode }: AuthFormProps) {
         </Link>
 
         <div className="form-header">
-          <p className="form-eyebrow">{isLogin ? 'MEMBER ACCESS' : 'GET STARTED'}</p>
-          <h1>{isLogin ? 'Welcome back' : 'Create your account'}</h1>
+          <p className="form-eyebrow">{isLogin ? 'MEMBER ACCESS' : 'UNIVERSITY VERIFICATION'}</p>
+          <h1>{isLogin ? 'Welcome back' : 'Request access'}</h1>
           <p className="form-description">
             {isLogin
               ? 'Sign in to continue to your account.'
-              : 'Create an account to start your professional journey.'}
+              : 'Use your .ac.mw school email. Roster matches get an activation link automatically; exceptions go to manual review.'}
           </p>
         </div>
 
+        {submittedMessage && <div className="success-message" role="status">{submittedMessage}</div>}
         {formError && <div className="form-error" role="alert">{formError}</div>}
 
-        <form onSubmit={handleSubmit}>
+        {!submittedMessage && <form onSubmit={handleSubmit}>
           {!isLogin && (
             <div className="form-group">
               <label htmlFor="name" className="form-label">Full name</label>
@@ -104,8 +105,39 @@ export default function AuthForm({ mode }: AuthFormProps) {
             </div>
           )}
 
+          {!isLogin && (
+            <>
+              <div className="form-group">
+                <label htmlFor="registration-number" className="form-label">University registration number</label>
+                <input
+                  autoComplete="off"
+                  className="form-input"
+                  disabled={isLoading}
+                  id="registration-number"
+                  maxLength={80}
+                  onChange={(event) => setRegistrationNumber(event.target.value)}
+                  required
+                  value={registrationNumber}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="program-type" className="form-label">University program</label>
+                <select
+                  className="form-input"
+                  disabled={isLoading}
+                  id="program-type"
+                  onChange={(event) => setProgramType(event.target.value as typeof programType)}
+                  value={programType}
+                >
+                  <option value="student_attachment">Student attachment</option>
+                  <option value="graduate_training">Two-year graduate training</option>
+                </select>
+              </div>
+            </>
+          )}
+
           <div className="form-group">
-            <label htmlFor="email" className="form-label">Email address</label>
+            <label htmlFor="email" className="form-label">{isLogin ? 'Email address' : 'School email address'}</label>
             <input
               autoComplete="email"
               className="form-input"
@@ -118,61 +150,27 @@ export default function AuthForm({ mode }: AuthFormProps) {
             />
           </div>
 
-          <div className="form-group">
+          {isLogin && <div className="form-group">
             <label htmlFor="password" className="form-label">Password</label>
             <input
               autoComplete={isLogin ? 'current-password' : 'new-password'}
               className="form-input"
               disabled={isLoading}
               id="password"
-              minLength={isLogin ? undefined : 12}
               onChange={(event) => setPassword(event.target.value)}
               required
               type="password"
               value={password}
             />
-            {!isLogin && <p className="auth-hint">Use at least 12 characters.</p>}
-          </div>
-
-          {!isLogin && (
-            <>
-              <div className="form-group">
-                <label htmlFor="confirm-password" className="form-label">
-                  Confirm password
-                </label>
-                <input
-                  autoComplete="new-password"
-                  className="form-input"
-                  disabled={isLoading}
-                  id="confirm-password"
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  required
-                  type="password"
-                  value={confirmPassword}
-                />
-              </div>
-              <label className="mentor-registration-option">
-                <input
-                  checked={registerAsMentor}
-                  disabled={isLoading}
-                  onChange={(event) => setRegisterAsMentor(event.target.checked)}
-                  type="checkbox"
-                />
-                <span>
-                  <strong>Would you like to register as a mentor?</strong>
-                  <small>Leave this unchecked to create a trainee account.</small>
-                </span>
-              </label>
-            </>
-          )}
+          </div>}
 
           <button className="form-button" disabled={isLoading} type="submit">
-            {isLoading ? 'Please wait…' : isLogin ? 'Sign in' : 'Create account'}
+            {isLoading ? 'Please wait…' : isLogin ? 'Sign in' : 'Submit for verification'}
           </button>
-        </form>
+        </form>}
 
         <div className="form-footer">
-          <span>{isLogin ? "Don't have an account?" : 'Already have an account?'}</span>{' '}
+          <span>{isLogin ? "Don't have an account?" : 'Already have access?'}</span>{' '}
           <Link href={isLogin ? '/register' : '/login'}>
             {isLogin ? 'Create an account' : 'Sign in'}
           </Link>
