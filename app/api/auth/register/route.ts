@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import bcrypt from 'bcryptjs';
 import { getDatabase } from '../../../../lib/database';
 import {
   assertUniversityEmailConfigured,
   escapeEmailHtml,
   getAppUrl,
-  getUniversityAdminEmail,
   sendUniversityEmail,
 } from '../../../../lib/university-email';
 import { createActivationToken, hashActivationToken } from '../../../../lib/university-activation';
@@ -37,8 +37,47 @@ export async function POST(request: NextRequest) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
     return NextResponse.json({ message: 'Enter a valid email address.' }, { status: 400 });
   }
+
+  if (role === 'university_admin') {
+    const password = typeof input.password === 'string' ? input.password : '';
+    if (!getAcademicEmailDomain(email)) {
+      return NextResponse.json(
+        { message: 'Use a university email ending in .ac.mw. You will register its domain after signing in.' },
+        { status: 400 },
+      );
+    }
+    if (password.length < 12 || Buffer.byteLength(password, 'utf8') > 72) {
+      return NextResponse.json(
+        { message: 'Password must be at least 12 characters and no more than 72 UTF-8 bytes.' },
+        { status: 400 },
+      );
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    try {
+      await getDatabase().query(
+        `INSERT INTO users (name, email, password_hash, role)
+         VALUES ($1, $2, $3, 'university_admin')`,
+        [name, email, passwordHash],
+      );
+      return NextResponse.json({
+        universityAdminCreated: true,
+        message: 'Your university administrator account is ready. Sign in, then register your university and school email domain in your workspace.',
+      }, { status: 201 });
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {
+        return NextResponse.json(
+          { message: 'An account already exists for this email.' },
+          { status: 409 },
+        );
+      }
+      console.error('Unable to create university account:', error);
+      return NextResponse.json({ message: 'Unable to register this university account right now.' }, { status: 503 });
+    }
+  }
+
   if (role !== 'trainee') {
-    return NextResponse.json({ message: 'Mentor accounts must be provisioned by the university.' }, { status: 403 });
+    return NextResponse.json({ message: 'Qualified architect accounts must be provisioned by the Board of Architects.' }, { status: 403 });
   }
 
   const registrationNumber =
@@ -58,10 +97,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: 'Use a university email ending in .ac.mw.' }, { status: 400 });
   }
 
-  let adminEmail: string;
   let appUrl: string;
   try {
-    adminEmail = getUniversityAdminEmail();
     appUrl = getAppUrl();
     assertUniversityEmailConfigured();
   } catch (error) {
@@ -75,12 +112,34 @@ export async function POST(request: NextRequest) {
   const database = getDatabase();
   const client = await database.connect();
   try {
+    const tenantResult = await client.query<{ tenant_id: string; admin_email: string }>(
+      `SELECT d.tenant_id, t.admin_email
+       FROM university_tenant_domains d
+       JOIN university_tenants t ON t.id = d.tenant_id
+       WHERE d.domain = $1`,
+      [domain],
+    );
+    const tenantId = tenantResult.rows[0]?.tenant_id;
+    if (!tenantId) {
+      return NextResponse.json(
+        { message: 'Your university domain is not registered. Contact your university administrator.' },
+        { status: 403 },
+      );
+    }
+    const tenantAdminEmail = tenantResult.rows[0].admin_email;
+
     const existingAccount = await client.query(
-      `SELECT 1 FROM users WHERE lower(email) = $1
+      `SELECT 1 FROM users WHERE lower(email) = $1 OR lower(alternative_email) = $1
        UNION ALL
-       SELECT 1 FROM trainee_profiles WHERE lower(registration_number) = lower($2)
+       SELECT 1 FROM trainee_profiles
+        WHERE lower(registration_number) = lower($2)
+       UNION ALL
+       SELECT 1 FROM university_student_roster r
+       WHERE (lower(r.school_email) = $1 OR lower(r.registration_number) = lower($2))
+         AND NOT (r.tenant_id = $3 AND lower(r.school_email) = $1
+                  AND lower(r.registration_number) = lower($2) AND r.status = 'available')
        LIMIT 1`,
-      [email, registrationNumber],
+      [email, registrationNumber, tenantId],
     );
     if (existingAccount.rowCount) {
       return NextResponse.json(
@@ -97,8 +156,10 @@ export async function POST(request: NextRequest) {
       full_name: string;
       school_email: string;
       program_type: 'student_attachment' | 'graduate_training';
+      enrollment_status: 'ongoing' | 'graduated';
     }>(
-      `SELECT r.id, r.tenant_id, r.registration_number, r.full_name, r.school_email, r.program_type
+      `SELECT r.id, r.tenant_id, r.registration_number, r.full_name, r.school_email,
+              r.program_type, r.enrollment_status
        FROM university_student_roster r
        JOIN university_tenant_domains d ON d.tenant_id = r.tenant_id
        WHERE d.domain = $1 AND lower(r.school_email) = $2
@@ -110,12 +171,13 @@ export async function POST(request: NextRequest) {
     if (rosterStudent) {
       const applicationResult = await client.query<{ id: string }>(
         `INSERT INTO university_applications
-           (full_name, registration_number, school_email, program_type, status,
+           (full_name, registration_number, school_email, program_type, enrollment_status, status,
             reviewed_at, reviewer_email, tenant_id, roster_id)
-         VALUES ($1, $2, $3, $4, 'approved', now(), 'domain-roster-simulation', $5, $6)
+         VALUES ($1, $2, $3, $4, $5, 'approved', now(), 'domain-roster-simulation', $6, $7)
          RETURNING id`,
         [rosterStudent.full_name, rosterStudent.registration_number, rosterStudent.school_email,
-          rosterStudent.program_type, rosterStudent.tenant_id, rosterStudent.id],
+          rosterStudent.program_type, rosterStudent.enrollment_status,
+          rosterStudent.tenant_id, rosterStudent.id],
       );
       const applicationId = applicationResult.rows[0].id;
       const activationToken = createActivationToken();
@@ -153,22 +215,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const tenantResult = await client.query<{ tenant_id: string }>(
-      `SELECT tenant_id FROM university_tenant_domains WHERE domain = $1`,
-      [domain],
-    );
     const applicationResult = await client.query<{ id: string }>(
       `INSERT INTO university_applications
          (full_name, registration_number, school_email, program_type, tenant_id)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id`,
-      [name, registrationNumber, email, programType, tenantResult.rows[0]?.tenant_id ?? null],
+      [name, registrationNumber, email, programType, tenantId],
     );
     await client.query('COMMIT');
 
     try {
       await sendUniversityEmail(
-        adminEmail,
+        tenantAdminEmail,
         'University account registration requires review',
         `<p>A student request needs manual review because it did not match an available roster entry.</p>
          <p><strong>Name:</strong> ${escapeEmailHtml(name)}<br>

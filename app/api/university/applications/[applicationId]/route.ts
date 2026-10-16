@@ -15,6 +15,9 @@ export async function POST(
 ) {
   const admin = await requireUniversityAdmin(request);
   if (!admin) return NextResponse.json({ message: 'University administrator access required.' }, { status: 403 });
+  if (!admin.universityTenantId) {
+    return NextResponse.json({ message: 'Set up your university workspace before reviewing requests.' }, { status: 409 });
+  }
 
   let appUrl: string;
   try {
@@ -50,10 +53,13 @@ export async function POST(
       school_email: string;
       program_type: 'student_attachment' | 'graduate_training';
       status: string;
+      roster_id: string | null;
     }>(
-      `SELECT id, full_name, registration_number, school_email, program_type, status
-       FROM university_applications WHERE id = $1 FOR UPDATE`,
-      [applicationId],
+      `SELECT id, full_name, registration_number, school_email, program_type, status, roster_id
+       FROM university_applications
+       WHERE id = $1 AND tenant_id = $2
+       FOR UPDATE`,
+      [applicationId, admin.universityTenantId],
     );
     const application = result.rows[0];
     if (!application || !['pending', 'approved'].includes(application.status)) {
@@ -71,6 +77,14 @@ export async function POST(
          WHERE id = $1`,
         [applicationId, admin.email],
       );
+      if (application.roster_id) {
+        await client.query(
+          `UPDATE university_student_roster
+           SET status = 'available', application_id = NULL
+           WHERE id = $1 AND status = 'invited'`,
+          [application.roster_id],
+        );
+      }
       await client.query('COMMIT');
       return NextResponse.json({ message: 'Request rejected.' });
     }
@@ -81,6 +95,14 @@ export async function POST(
        WHERE id = $1`,
       [applicationId, admin.email],
     );
+    if (application.roster_id) {
+      await client.query(
+        `UPDATE university_student_roster
+         SET status = 'invited', application_id = $2
+         WHERE id = $1 AND status <> 'activated'`,
+        [application.roster_id, applicationId],
+      );
+    }
     await client.query(
       `INSERT INTO university_activation_tokens (application_id, token_hash, expires_at)
        VALUES ($1, $2, now() + interval '48 hours')

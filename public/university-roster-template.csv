@@ -1,2 +1,2 @@
-registration_number,full_name,school_email,program_type,cohort
-BA23-0001,Sample Student,student1@example.ac.mw,student_attachment,2026-internship
+registration_number,full_name,school_email,program_type,enrollment_status,cohort
+BA23-0001,Sample Student,student1@example.ac.mw,student_attachment,ongoing,2026-internship

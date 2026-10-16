@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
-import { createSessionToken, setSessionCookie, type UserRole } from '../../../../lib/auth';
+import { createSessionToken, hasUniversityAdminAccess, setSessionCookie, type UserRole } from '../../../../lib/auth';
 import { getDatabase } from '../../../../lib/database';
 
 export async function POST(request: NextRequest) {
@@ -37,8 +37,9 @@ export async function POST(request: NextRequest) {
       email: string;
       role: UserRole;
       password_hash: string;
+      university_tenant_id: string | null;
     }>(
-      'SELECT id, name, email, role, password_hash FROM users WHERE email = $1',
+      'SELECT id, name, email, role, password_hash, university_tenant_id FROM users WHERE email = $1',
       [email],
     );
     const user = result.rows[0];
@@ -47,11 +48,13 @@ export async function POST(request: NextRequest) {
     }
 
     const token = await createSessionToken(user.id, user.role);
-    const universityAdmin =
-      Boolean(process.env.UNIVERSITY_ADMIN_EMAIL) &&
-      user.email.toLowerCase() === process.env.UNIVERSITY_ADMIN_EMAIL?.trim().toLowerCase();
     const response = NextResponse.json({
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, universityAdmin },
+      user: {
+        id: user.id, name: user.name, email: user.email, role: user.role,
+        universityAdmin: hasUniversityAdminAccess(user.role, user.email),
+        boardAdmin: user.role === 'board_admin',
+        universityTenantId: user.university_tenant_id,
+      },
     });
     setSessionCookie(response, token);
     return response;

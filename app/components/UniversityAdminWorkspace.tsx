@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import UniversityTenantManager from './UniversityTenantManager';
 import '../styles/university-admin.css';
 
-type View = 'overview' | 'approvals' | 'students' | 'graduates' | 'universities';
+type View = 'overview' | 'approvals' | 'students' | 'graduates' | 'university';
 
 interface Application {
   id: string;
@@ -22,6 +22,7 @@ interface StudentRecord {
   name: string;
   email: string;
   registrationNumber: string | null;
+  enrollmentStatus: 'ongoing' | 'graduated';
   registeredAt: string;
   attachmentCount: number;
 }
@@ -31,6 +32,7 @@ interface GraduateRecord {
   name: string;
   email: string;
   registrationNumber: string | null;
+  enrollmentStatus: 'ongoing' | 'graduated';
   registeredAt: string;
   entryCount: number;
 }
@@ -51,6 +53,7 @@ export default function UniversityAdminWorkspace() {
   const router = useRouter();
   const [view, setView] = useState<View>('overview');
   const [dashboard, setDashboard] = useState<DashboardData>(emptyDashboard);
+  const [hasUniversityWorkspace, setHasUniversityWorkspace] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState('');
   const [error, setError] = useState('');
@@ -72,7 +75,7 @@ export default function UniversityAdminWorkspace() {
     fetch('/api/auth/session', { cache: 'no-store' })
       .then(async (response) => {
         const result = (await response.json()) as {
-          user?: { universityAdmin?: boolean };
+          user?: { universityAdmin?: boolean; universityTenantId?: string | null };
           message?: string;
         };
         if (!response.ok) {
@@ -80,6 +83,9 @@ export default function UniversityAdminWorkspace() {
           throw new Error(result.message || 'Sign in to continue.');
         }
         if (!result.user?.universityAdmin) throw new Error('University administrator access is required.');
+        const hasWorkspace = Boolean(result.user.universityTenantId);
+        setHasUniversityWorkspace(hasWorkspace);
+        if (!hasWorkspace) setView('university');
         await refreshDashboard();
       })
       .catch((loadError: unknown) => {
@@ -122,6 +128,13 @@ export default function UniversityAdminWorkspace() {
 
   const pendingCount = dashboard.applications.filter((application) => application.status === 'pending').length;
   const approvedCount = dashboard.applications.filter((application) => application.status === 'approved').length;
+  const navigationItems: [View, string, string][] = hasUniversityWorkspace
+    ? [
+      ['overview', 'Overview', 'O'], ['approvals', 'Approvals', 'A'],
+      ['students', 'Attachment students', 'S'], ['graduates', 'Graduate training', 'G'],
+      ['university', 'My university', 'U'],
+    ]
+    : [['university', 'Set up university', 'U']];
 
   function renderApplications() {
     if (!dashboard.applications.length) return <p className="university-empty">No requests awaiting action.</p>;
@@ -149,10 +162,12 @@ export default function UniversityAdminWorkspace() {
   function renderStudents() {
     if (!dashboard.students.length) return <p className="university-empty">No registered attachment students yet.</p>;
     return <div className="university-table-wrap"><table className="university-table">
-      <thead><tr><th>Student</th><th>Registration</th><th>Registered</th><th>Attachments</th></tr></thead>
+      <thead><tr><th>Student</th><th>Registration</th><th>Enrollment</th><th>Registered</th><th>Attachments</th></tr></thead>
       <tbody>{dashboard.students.map((student) => <tr key={student.id}>
         <td><strong>{student.name}</strong><small>{student.email}</small></td>
-        <td>{student.registrationNumber || '—'}</td><td>{formatDate(student.registeredAt)}</td>
+        <td>{student.registrationNumber || '—'}</td>
+        <td><span className={`university-status ${student.enrollmentStatus}`}>{student.enrollmentStatus}</span></td>
+        <td>{formatDate(student.registeredAt)}</td>
         <td>{student.attachmentCount}</td>
       </tr>)}</tbody>
     </table></div>;
@@ -161,10 +176,12 @@ export default function UniversityAdminWorkspace() {
   function renderGraduates() {
     if (!dashboard.graduates.length) return <p className="university-empty">No registered graduates in the training program yet.</p>;
     return <div className="university-table-wrap"><table className="university-table">
-      <thead><tr><th>Graduate</th><th>Registration</th><th>Registered</th><th>Training entries</th></tr></thead>
+      <thead><tr><th>Graduate</th><th>Registration</th><th>Enrollment</th><th>Registered</th><th>Training entries</th></tr></thead>
       <tbody>{dashboard.graduates.map((graduate) => <tr key={graduate.id}>
         <td><strong>{graduate.name}</strong><small>{graduate.email}</small></td>
-        <td>{graduate.registrationNumber || '—'}</td><td>{formatDate(graduate.registeredAt)}</td>
+        <td>{graduate.registrationNumber || '—'}</td>
+        <td><span className={`university-status ${graduate.enrollmentStatus}`}>{graduate.enrollmentStatus}</span></td>
+        <td>{formatDate(graduate.registeredAt)}</td>
         <td>{graduate.entryCount}</td>
       </tr>)}</tbody>
     </table></div>;
@@ -175,11 +192,7 @@ export default function UniversityAdminWorkspace() {
       <a className="university-brand" href="/university-admin"><span>A</span><strong>ARCH<small>UNIVERSITY ADMIN</small></strong></a>
       <p className="university-nav-label">WORKSPACE</p>
       <nav className="university-nav" aria-label="University administration">
-        {([
-          ['overview', 'Overview', 'O'], ['approvals', 'Approvals', 'A'],
-          ['students', 'Attachment students', 'S'], ['graduates', 'Graduate training', 'G'],
-          ['universities', 'University tenants', 'U'],
-        ] as [View, string, string][]).map(([key, label, mark]) => (
+        {navigationItems.map(([key, label, mark]) => (
           <button className={view === key ? 'active' : ''} key={key} onClick={() => setView(key)} type="button">
             <span className="university-nav-mark">{mark}</span>{label}
             {key === 'approvals' && pendingCount > 0 && <span className="university-nav-count">{pendingCount}</span>}
@@ -194,7 +207,7 @@ export default function UniversityAdminWorkspace() {
         <button className="university-admin-badge" onClick={() => void signOut()} type="button">Sign out</button></header>
       <div className="university-content">
         <div className="university-page-heading">
-          <div><p>REGISTRATION & ROSTERS</p><h1>{view === 'overview' ? 'University overview' : view === 'approvals' ? 'Access requests' : view === 'students' ? 'Attachment students' : view === 'graduates' ? 'Graduate training' : 'University tenants'}</h1></div>
+          <div><p>YOUR UNIVERSITY WORKSPACE</p><h1>{view === 'overview' ? 'University overview' : view === 'approvals' ? 'Access requests' : view === 'students' ? 'Attachment students' : view === 'graduates' ? 'Graduate training' : hasUniversityWorkspace ? 'My university' : 'Set up your university'}</h1></div>
           <button className="university-refresh" disabled={loading} onClick={() => void refreshDashboard()} type="button" aria-label="Refresh records" title="Refresh records">↻</button>
         </div>
         {error && <div className="university-alert error" role="alert">{error}</div>}
@@ -217,7 +230,11 @@ export default function UniversityAdminWorkspace() {
             {view === 'approvals' && <section className="university-section">{renderApplications()}</section>}
             {view === 'students' && <section className="university-section">{renderStudents()}</section>}
             {view === 'graduates' && <section className="university-section">{renderGraduates()}</section>}
-            {view === 'universities' && <UniversityTenantManager />}
+            {view === 'university' && <UniversityTenantManager onUniversityReady={async () => {
+              setHasUniversityWorkspace(true);
+              setView('overview');
+              await refreshDashboard();
+            }} />}
           </>
         )}
       </div>

@@ -7,6 +7,12 @@ export async function GET(request: NextRequest) {
   try {
     const admin = await requireUniversityAdmin(request);
     if (!admin) return NextResponse.json({ message: 'University administrator access required.' }, { status: 403 });
+    if (!admin.universityTenantId) {
+      return NextResponse.json(
+        { applications: [], students: [], graduates: [] },
+        { headers: { 'Cache-Control': 'private, no-store' } },
+      );
+    }
 
     const [applications, students, graduates] = await Promise.all([
       getDatabase().query(
@@ -15,29 +21,37 @@ export async function GET(request: NextRequest) {
                 created_at AS "createdAt"
          FROM university_applications
          WHERE status IN ('pending', 'approved')
+           AND tenant_id = $1
          ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`,
+        [admin.universityTenantId],
       ),
       getDatabase().query(
         `SELECT u.id, u.name, u.email, p.registration_number AS "registrationNumber",
-                p.program_type AS "programType", p.stage, u.created_at AS "registeredAt",
+          p.program_type AS "programType", p.enrollment_status AS "enrollmentStatus",
+          p.stage, u.created_at AS "registeredAt",
                 count(a.id)::integer AS "attachmentCount"
          FROM users u
          JOIN trainee_profiles p ON p.user_id = u.id
          LEFT JOIN trainee_attachments a ON a.trainee_id = u.id
          WHERE p.program_type = 'student_attachment'
-         GROUP BY u.id, p.registration_number, p.program_type, p.stage
+           AND p.university_tenant_id = $1
+         GROUP BY u.id, p.registration_number, p.program_type, p.enrollment_status, p.stage
          ORDER BY u.created_at DESC`,
+        [admin.universityTenantId],
       ),
       getDatabase().query(
         `SELECT u.id, u.name, u.email, p.registration_number AS "registrationNumber",
-                p.program_type AS "programType", p.stage, u.created_at AS "registeredAt",
+          p.program_type AS "programType", p.enrollment_status AS "enrollmentStatus",
+          p.stage, u.created_at AS "registeredAt",
                 count(e.id)::integer AS "entryCount"
          FROM users u
          JOIN trainee_profiles p ON p.user_id = u.id
          LEFT JOIN experience_entries e ON e.trainee_id = u.id
          WHERE p.program_type = 'graduate_training'
-         GROUP BY u.id, p.registration_number, p.program_type, p.stage
+           AND p.university_tenant_id = $1
+         GROUP BY u.id, p.registration_number, p.program_type, p.enrollment_status, p.stage
          ORDER BY u.created_at DESC`,
+        [admin.universityTenantId],
       ),
     ]);
 

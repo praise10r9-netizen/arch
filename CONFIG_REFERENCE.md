@@ -2,9 +2,9 @@
 
 ## University Registration and Email
 
-Set `UNIVERSITY_ADMIN_EMAIL` to the exact email address used by the university administrator's login. For a fresh installation, create that account once with `UNIVERSITY_ADMIN_BOOTSTRAP_PASSWORD` set temporarily and run `bun run admin:create`; the command will not overwrite an existing account.
+University administrators first create an account with their name, `.ac.mw` email, and password. After signing in, each administrator sets up their own single-university workspace and registers the matching academic email domain. Domain registration is simulated by the app; it does not check or change public DNS, and no central administrator manages multiple universities. After migrations, `bun run admin:create-test` can create a local test administrator with a generated password; sign in and register its university domain before importing a roster. The command refuses to overwrite an existing account.
 
-Configure `APP_URL` and either `RESEND_API_KEY` plus `EMAIL_FROM`, or SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `EMAIL_FROM`) to enable review notifications and approval links. Gmail SMTP requires Google 2-Step Verification and an App Password from https://myaccount.google.com/apppasswords; do not use your normal Gmail password. `APP_URL` must be an absolute URL and must use HTTPS in production. Approved links expire after 48 hours and can be used once; approving an already-approved request issues a fresh link if delivery needs to be retried.
+Configure `APP_URL` and either `RESEND_API_KEY` plus `EMAIL_FROM`, or SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `EMAIL_FROM`) to enable review notifications and activation links. For local Mailpit, use `SMTP_HOST=localhost`, `SMTP_PORT=1025`, blank SMTP credentials, and a sender such as `ArchPath <no-reply@archpath.test>`; open `http://localhost:8025` to inspect mail. Gmail SMTP requires Google 2-Step Verification and an App Password from https://myaccount.google.com/apppasswords; do not use your normal Gmail password. `APP_URL` must be an absolute URL and must use HTTPS in production. Approved links expire after 48 hours and can be used once; approving an already-approved request issues a fresh link if delivery needs to be retried.
 
 ## Color Scheme Configuration
 

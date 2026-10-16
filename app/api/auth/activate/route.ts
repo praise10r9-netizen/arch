@@ -36,9 +36,13 @@ export async function POST(request: NextRequest) {
       school_email: string;
       registration_number: string;
       program_type: 'student_attachment' | 'graduate_training';
+      enrollment_status: 'ongoing' | 'graduated';
       roster_id: string | null;
+      tenant_id: string | null;
     }>(
-      `SELECT a.id, a.full_name, a.school_email, a.registration_number, a.program_type, a.roster_id
+            `SELECT a.id, a.full_name, a.school_email, a.registration_number, a.program_type,
+              a.enrollment_status,
+              a.roster_id, a.tenant_id
        FROM university_activation_tokens t
        JOIN university_applications a ON a.id = t.application_id
        WHERE t.token_hash = $1 AND t.consumed_at IS NULL AND t.expires_at > now()
@@ -62,9 +66,11 @@ export async function POST(request: NextRequest) {
     const user = userResult.rows[0];
     const stage = application.program_type === 'graduate_training' ? 'Two-year Graduate Training' : 'Student Attachment';
     await client.query(
-      `INSERT INTO trainee_profiles (user_id, stage, registration_number, program_type)
-       VALUES ($1, $2, $3, $4)`,
-      [user.id, stage, application.registration_number, application.program_type],
+      `INSERT INTO trainee_profiles
+         (user_id, stage, registration_number, program_type, enrollment_status, university_tenant_id)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [user.id, stage, application.registration_number, application.program_type,
+        application.enrollment_status, application.tenant_id],
     );
     await client.query(
       `UPDATE university_activation_tokens SET consumed_at = now() WHERE application_id = $1`,

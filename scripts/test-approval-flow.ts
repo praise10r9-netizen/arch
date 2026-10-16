@@ -50,7 +50,7 @@ try {
 
   const mentorResult = await pool.query<{ id: string }>(
     `INSERT INTO users (name, email, password_hash, role)
-     VALUES ('Approval Test Mentor', $1, 'unused', 'mentor')
+     VALUES ('Approval Test Architect', $1, 'unused', 'qualified_architect')
      RETURNING id`,
     [`mentor-${schema}@example.invalid`],
   );
@@ -62,7 +62,7 @@ try {
   );
   const otherMentorResult = await pool.query<{ id: string }>(
     `INSERT INTO users (name, email, password_hash, role)
-     VALUES ('Unassigned Test Mentor', $1, 'unused', 'mentor')
+     VALUES ('Unassigned Test Architect', $1, 'unused', 'qualified_architect')
      RETURNING id`,
     [`other-${schema}@example.invalid`],
   );

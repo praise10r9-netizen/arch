@@ -2,17 +2,39 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import '../styles/workspace.css';
 
-interface MentorUser {
+interface QualifiedArchitectUser {
   id: string;
   name: string;
   email: string;
-  role: 'trainee' | 'mentor';
+  role: 'trainee' | 'qualified_architect';
 }
 
-interface MentorNotification {
+interface ArchitectInvitation {
+  id: string;
+  email: string;
+  traineeName: string | null;
+  organization: string;
+  enrollmentStatus: 'ongoing' | 'graduated';
+  status: 'pending' | 'accepted' | 'expired';
+  createdAt: string;
+  expiresAt: string;
+  acceptedAt: string | null;
+}
+
+interface ActiveTrainee {
+  id: string;
+  name: string;
+  email: string;
+  organization: string | null;
+  programType: 'student_attachment' | 'graduate_training';
+  enrollmentStatus: 'ongoing' | 'graduated';
+  assignedAt: string;
+}
+
+interface ArchitectNotification {
   id: string;
   traineeName: string;
   category: string;
@@ -27,6 +49,7 @@ interface PendingApproval {
   entryId: string;
   traineeId: string;
   traineeName: string;
+  programType: 'student_attachment' | 'graduate_training';
   date: string;
   category: string;
   activity: string;
@@ -60,21 +83,34 @@ function formatReviewDate(date: string) {
   }).format(new Date(`${date}T00:00:00.000Z`));
 }
 
-export default function MentorWorkspace() {
+export default function QualifiedArchitectWorkspace({
+  page = 'overview',
+}: {
+  page?: 'overview' | 'actions';
+}) {
   const router = useRouter();
-  const [user, setUser] = useState<MentorUser | null>(null);
+  const [user, setUser] = useState<QualifiedArchitectUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notificationError, setNotificationError] = useState('');
   const [approvalError, setApprovalError] = useState('');
   const [approvalMessage, setApprovalMessage] = useState('');
-  const [notifications, setNotifications] = useState<MentorNotification[]>([]);
+  const [notifications, setNotifications] = useState<ArchitectNotification[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
   const [reviewState, setReviewState] = useState<ReviewState | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [approvingEntryId, setApprovingEntryId] = useState('');
   const [isBusy, setIsBusy] = useState(false);
-  const [alertNotification, setAlertNotification] = useState<MentorNotification | null>(null);
+  const [alertNotification, setAlertNotification] = useState<ArchitectNotification | null>(null);
+  const [invitations, setInvitations] = useState<ArchitectInvitation[]>([]);
+  const [activeTrainees, setActiveTrainees] = useState<ActiveTrainee[]>([]);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteOrganization, setInviteOrganization] = useState('');
+  const [inviteEnrollmentStatus, setInviteEnrollmentStatus] = useState<'' | 'ongoing' | 'graduated'>('');
+  const [reviewInstructions, setReviewInstructions] = useState('');
+  const [inviteError, setInviteError] = useState('');
+  const [inviteMessage, setInviteMessage] = useState('');
+  const [sendingInvite, setSendingInvite] = useState(false);
   const dismissedAlerts = useRef(new Set<string>());
 
   useEffect(() => {
@@ -86,16 +122,16 @@ export default function MentorWorkspace() {
           router.replace('/login');
           throw new Error(result.message || 'Please sign in.');
         }
-        const currentUser = result.user as MentorUser;
-        if (currentUser.role !== 'mentor') {
+        const currentUser = result.user as QualifiedArchitectUser;
+        if (currentUser.role !== 'qualified_architect') {
           router.replace('/trainee');
-          throw new Error('This space is for mentor accounts.');
+          throw new Error('This space is for qualified architect accounts.');
         }
         if (mounted) setUser(currentUser);
       })
       .catch((loadError: unknown) => {
         if (mounted) {
-          setError(loadError instanceof Error ? loadError.message : 'Unable to load mentor access.');
+          setError(loadError instanceof Error ? loadError.message : 'Unable to load qualified architect access.');
         }
       })
       .finally(() => {
@@ -112,7 +148,7 @@ export default function MentorWorkspace() {
       const response = await fetch('/api/mentor/notifications', { cache: 'no-store' });
       const result = (await response.json()) as {
         unreadCount?: number;
-        notifications?: MentorNotification[];
+        notifications?: ArchitectNotification[];
         message?: string;
       };
       if (!response.ok || !result.notifications) {
@@ -172,6 +208,31 @@ export default function MentorWorkspace() {
     };
   }, [refreshNotifications, user]);
 
+  const refreshInvitations = useCallback(async () => {
+    try {
+      const response = await fetch('/api/qualified-architect/invitations', { cache: 'no-store' });
+      const result = await response.json() as {
+        invitations?: ArchitectInvitation[];
+        activeTrainees?: ActiveTrainee[];
+        message?: string;
+      };
+      if (!response.ok || !result.invitations || !result.activeTrainees) {
+        throw new Error(result.message || 'Unable to refresh trainee invitations.');
+      }
+      setInvitations(result.invitations);
+      setActiveTrainees(result.activeTrainees);
+      setInviteError('');
+    } catch (loadError) {
+      setInviteError(loadError instanceof Error ? loadError.message : 'Unable to refresh trainee invitations.');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const initialRefresh = window.setTimeout(() => void refreshInvitations(), 0);
+    return () => window.clearTimeout(initialRefresh);
+  }, [refreshInvitations, user]);
+
   useEffect(() => {
     if (!user) return;
     const initialRefresh = window.setTimeout(() => void refreshPendingApprovals(), 0);
@@ -195,6 +256,35 @@ export default function MentorWorkspace() {
     else {
       const result = await response.json();
       setError(result.message || 'Unable to sign out.');
+    }
+  }
+
+  async function sendInvitation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setInviteError('');
+    setInviteMessage('');
+    setSendingInvite(true);
+    try {
+      const response = await fetch('/api/qualified-architect/invitations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: inviteEmail,
+          organization: inviteOrganization,
+          isGraduate: inviteEnrollmentStatus === 'graduated',
+        }),
+      });
+      const result = await response.json() as { message?: string };
+      if (!response.ok) throw new Error(result.message || 'Unable to send this invitation.');
+      setInviteEmail('');
+      setInviteOrganization('');
+      setInviteEnrollmentStatus('');
+      setInviteMessage('Secure invitation sent. The relationship starts only after the trainee accepts.');
+      await refreshInvitations();
+    } catch (sendError) {
+      setInviteError(sendError instanceof Error ? sendError.message : 'Unable to send this invitation.');
+    } finally {
+      setSendingInvite(false);
     }
   }
 
@@ -226,7 +316,10 @@ export default function MentorWorkspace() {
     }
   }
 
-  async function approveEntry(entryId: string) {
+  async function reviewEntry(
+    entryId: string,
+    action: 'approve' | 'request_changes',
+  ) {
     setApprovalError('');
     setApprovalMessage('');
     setApprovingEntryId(entryId);
@@ -234,13 +327,20 @@ export default function MentorWorkspace() {
       const response = await fetch('/api/mentor/entries', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entryId }),
+        body: JSON.stringify({
+          entryId,
+          action,
+          ...(action === 'request_changes' ? { instructions: reviewInstructions } : {}),
+        }),
       });
       const result = (await response.json()) as { message?: string };
       if (!response.ok) throw new Error(result.message || 'Unable to approve this log.');
       setPendingApprovals((current) => current.filter((entry) => entry.entryId !== entryId));
       setReviewState(null);
-      setApprovalMessage('Log approved. The signed audit record has been securely stored.');
+      setReviewInstructions('');
+      setApprovalMessage(action === 'approve'
+        ? 'Log approved. The signed audit record has been securely stored.'
+        : 'Instructions sent to the trainee and saved with the log.');
       await Promise.all([refreshPendingApprovals(), refreshNotifications()]);
     } catch (approveError) {
       setApprovalError(
@@ -254,6 +354,7 @@ export default function MentorWorkspace() {
   async function openReview(entryId: string) {
     setApprovalMessage('');
     setApprovalError('');
+    setReviewInstructions('');
     setReviewState({ entryId, loading: true, error: '', review: null });
     try {
       const response = await fetch(`/api/mentor/entries/${encodeURIComponent(entryId)}`, {
@@ -285,7 +386,7 @@ export default function MentorWorkspace() {
   }
 
   if (loading) {
-    return <main className="workspace-loading" aria-live="polite"><p>Loading mentor access…</p></main>;
+    return <main className="workspace-loading" aria-live="polite"><p>Loading qualified architect access…</p></main>;
   }
   if (!user) {
     return <main className="workspace-error"><p role="alert">{error || 'Sign in to continue.'}</p><Link href="/login">Sign in</Link></main>;
@@ -301,7 +402,7 @@ export default function MentorWorkspace() {
             onClick={() => setReviewState(null)}
             type="button"
           >
-            <span aria-hidden="true">←</span> Back to mentor workspace
+            <span aria-hidden="true">←</span> Back to qualified architect workspace
           </button>
           <span className="mentor-review-secure-label">PRIVATE REVIEW</span>
         </header>
@@ -319,7 +420,7 @@ export default function MentorWorkspace() {
               onClick={() => setReviewState(null)}
               type="button"
             >
-              Return to mentor workspace
+              Return to qualified architect workspace
             </button>
           </div>
         ) : (
@@ -341,6 +442,10 @@ export default function MentorWorkspace() {
                   <div>
                     <dt>Training category</dt>
                     <dd>{review.entry.category}</dd>
+                  </div>
+                  <div>
+                    <dt>Training route</dt>
+                    <dd>{review.entry.programType === 'graduate_training' ? 'Two-year graduate training' : 'Academic internship'}</dd>
                   </div>
                   <div>
                     <dt>Time recorded</dt>
@@ -396,19 +501,40 @@ export default function MentorWorkspace() {
             </div>
             <footer className="mentor-review-action-bar">
               <div>
-                <strong>Ready to approve this experience?</strong>
-                <span>Approval signs and preserves this reviewed log for audit.</span>
+                <strong>Choose an action for this experience</strong>
+                <span>Approval signs the log for audit. Instructions are saved and shown to the trainee.</span>
               </div>
-              <button
-                className="button button-primary mentor-review-approve"
-                disabled={approvingEntryId !== ''}
-                onClick={() => void approveEntry(review.entry.entryId)}
-                type="button"
-              >
-                {approvingEntryId === review.entry.entryId
-                  ? 'Signing approval…'
-                  : 'Approve reviewed log'}
-              </button>
+              <div className="mentor-review-actions">
+                <label>
+                  Specific instructions (required to request changes)
+                  <textarea
+                    maxLength={1000}
+                    minLength={10}
+                    onChange={(event) => setReviewInstructions(event.target.value)}
+                    placeholder="Explain what the trainee should clarify or update…"
+                    rows={3}
+                    value={reviewInstructions}
+                  />
+                </label>
+                <div className="mentor-review-buttons">
+                  <button
+                    className="button button-secondary mentor-review-request"
+                    disabled={approvingEntryId !== '' || reviewInstructions.trim().length < 10}
+                    onClick={() => void reviewEntry(review.entry.entryId, 'request_changes')}
+                    type="button"
+                  >
+                    {approvingEntryId === review.entry.entryId ? 'Saving review…' : 'Send instructions'}
+                  </button>
+                  <button
+                    className="button button-primary mentor-review-approve"
+                    disabled={approvingEntryId !== ''}
+                    onClick={() => void reviewEntry(review.entry.entryId, 'approve')}
+                    type="button"
+                  >
+                    {approvingEntryId === review.entry.entryId ? 'Signing approval…' : 'Approve reviewed log'}
+                  </button>
+                </div>
+              </div>
             </footer>
           </>
         )}
@@ -419,15 +545,32 @@ export default function MentorWorkspace() {
   return (
     <div className="workspace-shell">
       <aside className="workspace-sidebar">
-        <Link className="workspace-brand" href="/mentor" aria-label="ArchPath home">
+        <Link className="workspace-brand" href="/architect" aria-label="ArchPath home">
           <span className="workspace-brand-mark" aria-hidden="true">A</span>
-          <span><strong>ArchPath</strong><small>MENTOR SPACE</small></span>
+          <span><strong>ArchPath</strong><small>ARCHITECT SPACE</small></span>
         </Link>
-        <div className="sidebar-section-label">MENTOR ACCESS</div>
+        <div className="sidebar-section-label">QUALIFIED ARCHITECT ACCESS</div>
+        <nav className="workspace-nav" aria-label="Qualified architect workspace">
+          <Link
+            aria-current={page === 'overview' ? 'page' : undefined}
+            className={`workspace-nav-item${page === 'overview' ? ' active' : ''}`}
+            href="/architect"
+          >
+            <span className="nav-mark" aria-hidden="true">O</span> Overview
+          </Link>
+          <Link
+            aria-current={page === 'actions' ? 'page' : undefined}
+            className={`workspace-nav-item${page === 'actions' ? ' active' : ''}`}
+            href="/architect/actions"
+          >
+            <span className="nav-mark" aria-hidden="true">A</span> Actions
+            {pendingApprovals.length > 0 && <span className="nav-count">{pendingApprovals.length}</span>}
+          </Link>
+        </nav>
         <div className="sidebar-help">
           <span className="help-spark" aria-hidden="true">i</span>
           <strong>Account role</strong>
-          <p>Your mentor role is verified from your current database account.</p>
+          <p>Your qualified architect role is verified from your current database account.</p>
         </div>
         <button className="sidebar-signout sidebar-signout-button" onClick={signOut} type="button">
           <span aria-hidden="true">↗</span> Sign out
@@ -435,9 +578,9 @@ export default function MentorWorkspace() {
       </aside>
       <main className="workspace-main">
         <header className="workspace-topbar">
-          <div className="breadcrumb"><span>My workspace</span><span aria-hidden="true">/</span><strong>Mentor</strong></div>
+          <div className="breadcrumb"><span>My workspace</span><span aria-hidden="true">/</span><strong>{page === 'actions' ? 'Actions' : 'Qualified architect'}</strong></div>
           <div className="topbar-profile">
-            <div className="profile-copy"><strong>{user.name}</strong><span>Mentor</span></div>
+            <div className="profile-copy"><strong>{user.name}</strong><span>Qualified architect</span></div>
             <span className="profile-avatar" aria-label={user.name}>
               {user.name.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
             </span>
@@ -447,17 +590,84 @@ export default function MentorWorkspace() {
           <section aria-labelledby="mentor-title">
             <div className="page-heading">
               <div>
-                <p className="page-eyebrow">MENTOR ACCOUNT</p>
-                <h1 id="mentor-title">Welcome, {user.name.split(' ')[0]}.</h1>
-
+                <p className="page-eyebrow">QUALIFIED ARCHITECT</p>
+                <h1 id="mentor-title">{page === 'actions' ? 'Actions' : `Welcome, ${user.name.split(' ')[0]}.`}</h1>
+                <p>{page === 'actions'
+                  ? 'Review trainee log books, approve completed activities, or send specific instructions.'
+                  : 'Manage trainee invitations and stay up to date with your assigned trainees.'}</p>
               </div>
             </div>
+            {page === 'overview' && <>
             <article className="panel attachment-panel">
-              <h2>Mentor review</h2>
+              <h2>Training supervision</h2>
               <p className="attachment-description">
-                Trainees assigned to you will appear in your notification inbox when
-                they save an experience log.
+                Review trainee activities from Actions. Trainees assigned to you appear here once
+                they accept your secure invitation.
               </p>
+              <Link className="button button-secondary architect-actions-link" href="/architect/actions">
+                Open Actions{pendingApprovals.length > 0 ? ` · ${pendingApprovals.length} awaiting review` : ''}
+              </Link>
+            </article>
+            <article className="panel architect-invitations-panel">
+              <div className="mentor-notifications-header">
+                <div>
+                  <p className="panel-kicker">TRAINEE AGREEMENTS</p>
+                  <h2>Invite a trainee</h2>
+                </div>
+                <span className="section-count">{activeTrainees.length} active</span>
+              </div>
+              <p className="attachment-description">
+                Enter the trainee’s email and the organization for this placement. Their logs are not shared until they accept the secure invitation.
+              </p>
+              <form className="architect-invitation-form" onSubmit={sendInvitation}>
+                <label>
+                  <span>Trainee email</span>
+                  <input autoComplete="email" disabled={sendingInvite} onChange={(event) => setInviteEmail(event.target.value)} required type="email" value={inviteEmail} />
+                </label>
+                <label>
+                  <span>Training organization</span>
+                  <input disabled={sendingInvite} maxLength={160} onChange={(event) => setInviteOrganization(event.target.value)} required value={inviteOrganization} />
+                </label>
+                <label>
+                  <span>Trainee status</span>
+                  <select
+                    disabled={sendingInvite}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setInviteEnrollmentStatus(
+                        value === 'ongoing' || value === 'graduated' ? value : '',
+                      );
+                    }}
+                    required
+                    value={inviteEnrollmentStatus}
+                  >
+                    <option value="">Choose status</option>
+                    <option value="graduated">Graduated · two-year training</option>
+                    <option value="ongoing">Not graduated · academic internship</option>
+                  </select>
+                </label>
+                <button className="button button-primary" disabled={sendingInvite} type="submit">
+                  {sendingInvite ? 'Sending…' : 'Send secure invitation'}
+                </button>
+              </form>
+              {inviteError && <p className="workspace-feedback error" role="alert">{inviteError}</p>}
+              {inviteMessage && <p className="workspace-feedback success" role="status">{inviteMessage}</p>}
+              {activeTrainees.length > 0 && <div className="architect-active-trainees">
+                <h3>Active trainee relationships</h3>
+                {activeTrainees.map((trainee) => <p key={trainee.id}>
+                  <strong>{trainee.name}</strong> · {trainee.email}
+                  <small>{trainee.enrollmentStatus === 'graduated' ? 'Two-year graduate training' : 'Pre-graduate academic internship'} · {trainee.organization || 'Organization not recorded'}</small>
+                </p>)}
+              </div>}
+              <div className="architect-invitations-list">
+                <h3>Recent invitations</h3>
+                {invitations.length === 0
+                  ? <p className="attachment-empty">No invitations have been sent yet.</p>
+                  : invitations.map((invitation) => <p key={invitation.id}>
+                    <strong>{invitation.traineeName || invitation.email}</strong> · {invitation.organization}
+                    <small>{invitation.enrollmentStatus === 'graduated' ? 'Two-year graduate training' : 'Pre-graduate academic internship'} · {invitation.status === 'pending' && new Date(invitation.expiresAt) <= new Date() ? 'expired' : invitation.status}</small>
+                  </p>)}
+              </div>
             </article>
             <article className="panel mentor-notifications-panel">
               <div className="mentor-notifications-header">
@@ -528,7 +738,8 @@ export default function MentorWorkspace() {
                 </div>
               )}
             </article>
-            <article className="panel mentor-approvals-panel">
+            </>}
+            {page === 'actions' && <article className="panel mentor-approvals-panel">
               <div className="mentor-notifications-header">
                 <div>
                   <p className="panel-kicker">ASSIGNED TRAINEES</p>
@@ -553,7 +764,7 @@ export default function MentorWorkspace() {
                   {pendingApprovals.map((entry) => (
                     <article className="mentor-approval-card" key={entry.entryId}>
                       <div className="mentor-approval-copy">
-                        <p className="panel-kicker">{entry.traineeName} · {entry.category}</p>
+                        <p className="panel-kicker">{entry.traineeName} · {entry.programType === 'graduate_training' ? 'Two-year graduate training' : 'Academic internship'} · {entry.category}</p>
                         <h3>{entry.date} · {entry.hours} hours</h3>
                         <p>{entry.activity}</p>
                       </div>
@@ -568,7 +779,7 @@ export default function MentorWorkspace() {
                   ))}
                 </div>
               )}
-            </article>
+            </article>}
           </section>
         </div>
       </main>

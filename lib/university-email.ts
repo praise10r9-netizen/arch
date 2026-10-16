@@ -71,14 +71,6 @@ export function assertUniversityEmailConfigured(): void {
   getEmailConfiguration();
 }
 
-export function getUniversityAdminEmail(): string {
-  const email = process.env.UNIVERSITY_ADMIN_EMAIL?.trim().toLowerCase();
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new Error('UNIVERSITY_ADMIN_EMAIL is not configured with a valid email.');
-  }
-  return email;
-}
-
 export function escapeEmailHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({
     '&': '&amp;',

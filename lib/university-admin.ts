@@ -6,6 +6,12 @@ export async function requireUniversityAdmin(
   request: NextRequest,
 ): Promise<AuthenticatedUser | null> {
   const user = await getAuthenticatedUser(request);
-  const adminEmail = process.env.UNIVERSITY_ADMIN_EMAIL?.trim().toLowerCase();
-  return user && adminEmail && user.email.toLowerCase() === adminEmail ? user : null;
+  return user?.universityAdmin ? user : null;
+}
+
+export function canManageUniversityTenant(
+  admin: AuthenticatedUser,
+  tenantId: string,
+): boolean {
+  return admin.universityTenantId === tenantId;
 }

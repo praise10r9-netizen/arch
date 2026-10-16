@@ -21,10 +21,10 @@ async function getMentor(request: NextRequest) {
       response: NextResponse.json({ message: 'Sign in to view notifications.' }, { status: 401 }),
     };
   }
-  if (user.role !== 'mentor') {
+  if (user.role !== 'qualified_architect') {
     return {
       user: null,
-      response: NextResponse.json({ message: 'Mentor access is required.' }, { status: 403 }),
+      response: NextResponse.json({ message: 'Qualified architect access is required.' }, { status: 403 }),
     };
   }
   return { user, response: null };

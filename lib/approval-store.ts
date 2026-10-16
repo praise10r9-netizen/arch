@@ -7,6 +7,7 @@ export interface PendingApproval {
   entryId: string;
   traineeId: string;
   traineeName: string;
+  programType: 'student_attachment' | 'graduate_training';
   date: string;
   category: string;
   activity: string;
@@ -33,6 +34,7 @@ export async function getPendingApprovals(mentorId: string): Promise<PendingAppr
     entry_id: string;
     trainee_id: string;
     trainee_name: string;
+    program_type: 'student_attachment' | 'graduate_training';
     occurred_on: string;
     category: string;
     activity: string;
@@ -42,6 +44,7 @@ export async function getPendingApprovals(mentorId: string): Promise<PendingAppr
     `SELECT entry.id AS entry_id,
             trainee.id AS trainee_id,
             trainee.name AS trainee_name,
+            profile.program_type,
             entry.occurred_on::text AS occurred_on,
             entry.category,
             entry.activity,
@@ -53,6 +56,7 @@ export async function getPendingApprovals(mentorId: string): Promise<PendingAppr
       AND assignment.mentor_id = $1
       AND assignment.ended_at IS NULL
      JOIN users trainee ON trainee.id = entry.trainee_id
+     JOIN trainee_profiles profile ON profile.user_id = trainee.id
      WHERE entry.status = 'pending'
      ORDER BY entry.occurred_on DESC, entry.created_at DESC
      LIMIT 100`,
@@ -63,6 +67,7 @@ export async function getPendingApprovals(mentorId: string): Promise<PendingAppr
     entryId: row.entry_id,
     traineeId: row.trainee_id,
     traineeName: row.trainee_name,
+    programType: row.program_type,
     date: row.occurred_on,
     category: row.category,
     activity: row.activity,
@@ -80,6 +85,7 @@ export async function getApprovalReview(
     entry_id: string;
     trainee_id: string;
     trainee_name: string;
+    program_type: 'student_attachment' | 'graduate_training';
     occurred_on: string;
     category: string;
     activity: string;
@@ -89,6 +95,7 @@ export async function getApprovalReview(
     `SELECT entry.id AS entry_id,
             trainee.id AS trainee_id,
             trainee.name AS trainee_name,
+            profile.program_type,
             entry.occurred_on::text AS occurred_on,
             entry.category,
             entry.activity,
@@ -96,6 +103,7 @@ export async function getApprovalReview(
             entry.created_at
      FROM experience_entries entry
      JOIN users trainee ON trainee.id = entry.trainee_id
+     JOIN trainee_profiles profile ON profile.user_id = trainee.id
      JOIN mentor_assignments assignment
        ON assignment.trainee_id = entry.trainee_id
       AND assignment.mentor_id = $1
@@ -127,6 +135,7 @@ export async function getApprovalReview(
       entryId: row.entry_id,
       traineeId: row.trainee_id,
       traineeName: row.trainee_name,
+      programType: row.program_type,
       date: row.occurred_on,
       category: row.category,
       activity: row.activity,
@@ -218,9 +227,9 @@ export async function approveExperienceEntry(mentorId: string, entryId: string) 
 
     const update = await client.query(
       `UPDATE experience_entries
-       SET status = 'approved'
+       SET status = 'approved', reviewed_at = now(), reviewed_by = $2
        WHERE id = $1 AND status = 'pending'`,
-      [entry.id],
+      [entry.id, mentorId],
     );
     if (update.rowCount !== 1) {
       await client.query('ROLLBACK');
@@ -256,6 +265,62 @@ export async function approveExperienceEntry(mentorId: string, entryId: string) 
   } catch (error) {
     await client.query('ROLLBACK').catch((rollbackError: unknown) => {
       console.error('Unable to roll back approval transaction:', rollbackError);
+    });
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function requestExperienceChanges(
+  mentorId: string,
+  entryId: string,
+  instructions: string,
+) {
+  const client = await getDatabase().connect();
+  try {
+    await client.query('BEGIN');
+    const entry = await client.query<{ status: 'pending' | 'approved' | 'changes-requested' }>(
+      `SELECT entry.status
+       FROM experience_entries entry
+       JOIN mentor_assignments assignment
+         ON assignment.trainee_id = entry.trainee_id
+        AND assignment.mentor_id = $2
+        AND assignment.ended_at IS NULL
+       WHERE entry.id = $1
+       FOR UPDATE OF entry, assignment`,
+      [entryId, mentorId],
+    );
+    const current = entry.rows[0];
+    if (!current) {
+      await client.query('ROLLBACK');
+      return { kind: 'not-found' as const };
+    }
+    if (current.status !== 'pending') {
+      await client.query('ROLLBACK');
+      return { kind: 'not-pending' as const };
+    }
+
+    await client.query(
+      `UPDATE experience_entries
+       SET status = 'changes-requested',
+           review_instructions = $2,
+           reviewed_at = now(),
+           reviewed_by = $3
+       WHERE id = $1`,
+      [entryId, instructions, mentorId],
+    );
+    await client.query(
+      `UPDATE mentor_notifications
+       SET read_at = COALESCE(read_at, now())
+       WHERE mentor_id = $1 AND entry_id = $2`,
+      [mentorId, entryId],
+    );
+    await client.query('COMMIT');
+    return { kind: 'changes-requested' as const };
+  } catch (error) {
+    await client.query('ROLLBACK').catch((rollbackError: unknown) => {
+      console.error('Unable to roll back log instructions:', rollbackError);
     });
     throw error;
   } finally {

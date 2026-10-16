@@ -10,7 +10,7 @@ export async function GET(
   try {
     const user = await getAuthenticatedUser(request);
     if (!user) return NextResponse.json({ message: 'Sign in to review logs.' }, { status: 401 });
-    if (user.role !== 'mentor') return NextResponse.json({ message: 'Mentor access is required.' }, { status: 403 });
+    if (user.role !== 'qualified_architect') return NextResponse.json({ message: 'Qualified architect access is required.' }, { status: 403 });
 
     const { entryId } = await context.params;
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entryId)) {

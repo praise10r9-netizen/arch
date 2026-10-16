@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "db:migrate": "bun scripts/migrate.ts",
-    "admin:create": "bun scripts/create-university-admin.ts",
+    "board-admin:create": "bun --env-file=.env --env-file=.env.local scripts/create-board-admin.ts",
+    "admin:create-test": "bun scripts/create-test-university-admin.ts",
     "approvals:verify": "bun scripts/verify-approvals.ts",
     "test:approval-flow": "bun --conditions=react-server scripts/test-approval-flow.ts"
   },

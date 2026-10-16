@@ -16,9 +16,13 @@ export async function getTraineeWorkspace(
     id: string;
     name: string;
     email: string;
+    alternative_email: string | null;
     stage: string;
+    program_type: 'student_attachment' | 'graduate_training';
+    enrollment_status: 'ongoing' | 'graduated';
   }>(
-    `SELECT u.id, u.name, u.email, p.stage
+    `SELECT u.id, u.name, u.email, u.alternative_email, p.stage,
+            p.program_type, p.enrollment_status
      FROM users u
      JOIN trainee_profiles p ON p.user_id = u.id
      WHERE u.id = $1 AND u.role = 'trainee'`,
@@ -35,9 +39,11 @@ export async function getTraineeWorkspace(
       activity: string;
       hours: string;
       status: TrainingEntry['status'];
+      review_instructions: string | null;
       created_at: Date;
     }>(
-      `SELECT id, occurred_on::text AS date, category, activity, hours, status, created_at
+      `SELECT id, occurred_on::text AS date, category, activity, hours, status,
+              review_instructions, created_at
        FROM experience_entries
        WHERE trainee_id = $1
        ORDER BY occurred_on DESC, created_at DESC`,
@@ -61,7 +67,15 @@ export async function getTraineeWorkspace(
   ]);
 
   return {
-    trainee: profile,
+    trainee: {
+      id: profile.id,
+      name: profile.name,
+      email: profile.email,
+      alternativeEmail: profile.alternative_email,
+      stage: profile.stage,
+      programType: profile.program_type,
+      enrollmentStatus: profile.enrollment_status,
+    },
     categories: [...TRAINING_CATEGORIES],
     entries: entriesResult.rows.map((entry) => ({
       id: entry.id,
@@ -70,6 +84,7 @@ export async function getTraineeWorkspace(
       activity: entry.activity,
       hours: Number(entry.hours),
       status: entry.status,
+      reviewInstructions: entry.review_instructions,
       createdAt: entry.created_at.toISOString(),
     })),
     attachments: attachmentsResult.rows.map((attachment) => ({
@@ -98,11 +113,13 @@ export async function addTrainingEntry(
       activity: string;
       hours: string;
       status: TrainingEntry['status'];
+      review_instructions: string | null;
       created_at: Date;
     }>(
       `INSERT INTO experience_entries (trainee_id, occurred_on, category, activity, hours)
        VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, occurred_on::text AS date, category, activity, hours, status, created_at`,
+       RETURNING id, occurred_on::text AS date, category, activity, hours, status,
+                 review_instructions, created_at`,
       [traineeId, input.date, input.category, input.activity, input.hours],
     );
     const row = result.rows[0];
@@ -129,6 +146,7 @@ export async function addTrainingEntry(
         activity: row.activity,
         hours: Number(row.hours),
         status: row.status,
+        reviewInstructions: row.review_instructions,
         createdAt: row.created_at.toISOString(),
       },
       notificationCreated: Boolean(mentorId),

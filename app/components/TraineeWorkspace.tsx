@@ -60,10 +60,12 @@ export default function TraineeWorkspace() {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('overview');
   const [experienceMode, setExperienceMode] = useState<ExperienceMode>('view');
   const [entry, setEntry] = useState<NewTrainingEntry>(initialEntry);
+  const [alternativeEmail, setAlternativeEmail] = useState('');
   const [attachmentKind, setAttachmentKind] = useState<AttachmentKind>('evidence');
   const [evidenceEntryId, setEvidenceEntryId] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingEmail, setIsSavingEmail] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [error, setError] = useState('');
@@ -76,7 +78,7 @@ export default function TraineeWorkspace() {
         const result = await response.json();
         if (!response.ok) {
           if (response.status === 401) router.replace('/login');
-          if (response.status === 403) router.replace('/mentor');
+          if (response.status === 403) router.replace('/architect');
           throw new Error(result.message || 'Unable to load your workspace.');
         }
         return result as TraineeWorkspaceData;
@@ -84,6 +86,7 @@ export default function TraineeWorkspace() {
       .then((data) => {
         if (!mounted) return;
         setWorkspace(data);
+        setAlternativeEmail(data.trainee.alternativeEmail ?? '');
         setEvidenceEntryId(
           data.entries.find((item) =>
             item.status === 'pending' &&
@@ -122,6 +125,42 @@ export default function TraineeWorkspace() {
   const evidence = workspace?.attachments.filter((item) => item.kind === 'evidence') ?? [];
   const certificates = workspace?.attachments.filter((item) => item.kind === 'certificate') ?? [];
 
+  async function saveAlternativeEmail(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError('');
+    setMessage('');
+    setIsSavingEmail(true);
+    try {
+      const response = await fetch('/api/trainee/account', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alternativeEmail }),
+      });
+      const result = await response.json() as {
+        email?: string;
+        alternativeEmail?: string | null;
+        message?: string;
+      };
+      if (!response.ok || !result.email) {
+        throw new Error(result.message || 'Unable to update your alternative email.');
+      }
+      setWorkspace((current) => current ? {
+        ...current,
+        trainee: {
+          ...current.trainee,
+          email: result.email as string,
+          alternativeEmail: result.alternativeEmail ?? null,
+        },
+      } : current);
+      setAlternativeEmail(result.alternativeEmail ?? '');
+      setMessage(result.message || 'Alternative email saved.');
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Unable to update your alternative email.');
+    } finally {
+      setIsSavingEmail(false);
+    }
+  }
+
   async function submitEntry(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
@@ -151,8 +190,8 @@ export default function TraineeWorkspace() {
       }));
       setMessage(
         result.notificationCreated
-          ? 'Experience saved and added to your mentor’s notification inbox.'
-          : 'Experience saved. No mentor is assigned to your account yet, so it was not sent for review.',
+          ? 'Experience saved and added to your qualified architect’s notification inbox.'
+          : 'Experience saved. No qualified architect is assigned to your account yet, so it was not sent for review.',
       );
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Unable to save this entry.');
@@ -374,9 +413,33 @@ export default function TraineeWorkspace() {
                 <article className="stat-card">
                   <span className="stat-label">Awaiting review</span>
                   <strong>{pendingEntries}</strong>
-                  <span className="stat-foot">Entries awaiting mentor review</span>
+                  <span className="stat-foot">Entries awaiting qualified architect review</span>
                 </article>
               </div>
+              <article className="panel recent-panel">
+                <div className="panel-heading">
+                  <div><p className="panel-kicker">ACCOUNT DETAILS</p><h2>University status & email</h2></div>
+                </div>
+                <p>{workspace.trainee.programType === 'student_attachment' ? 'Student attachment' : 'Graduate training'} · {workspace.trainee.enrollmentStatus}</p>
+                <p>Current login email: <strong>{workspace.trainee.email}</strong></p>
+                <form className="entry-form" onSubmit={saveAlternativeEmail}>
+                  <label>
+                    Alternative email
+                    <input
+                      autoComplete="email"
+                      maxLength={254}
+                      onChange={(event) => setAlternativeEmail(event.target.value)}
+                      placeholder="name@example.com"
+                      type="email"
+                      value={alternativeEmail}
+                    />
+                  </label>
+                  <p className="field-hint">When your university marks you graduated, this becomes your login email.</p>
+                  <button className="button button-primary form-submit" disabled={isSavingEmail} type="submit">
+                    {isSavingEmail ? 'Saving…' : 'Save alternative email'}
+                  </button>
+                </form>
+              </article>
               <article className="panel recent-panel">
                 <div className="panel-heading">
                   <div><p className="panel-kicker">LATEST ACTIVITY</p><h2>Recent experience</h2></div>
@@ -613,7 +676,15 @@ function EntryTable({ entries }: { entries: TrainingEntry[] }) {
         <tbody>
           {entries.map((item) => (
             <tr key={item.id}>
-              <td><strong>{item.category}</strong><span>{item.activity}</span></td>
+              <td>
+                <strong>{item.category}</strong>
+                <span>{item.activity}</span>
+                {item.reviewInstructions && (
+                  <small className="entry-review-instructions">
+                    Mentor instructions: {item.reviewInstructions}
+                  </small>
+                )}
+              </td>
               <td className="entry-date">{formatDate(item.date)}</td>
               <td className="entry-hours">{item.hours}</td>
               <td><span className={`status-pill ${item.status}`}>{item.status === 'pending' ? 'Awaiting review' : item.status === 'approved' ? 'Approved' : 'Changes requested'}</span></td>

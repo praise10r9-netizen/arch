@@ -8,12 +8,16 @@ export const TRAINING_CATEGORIES = [
 export type TrainingCategory = (typeof TRAINING_CATEGORIES)[number];
 export type EntryStatus = 'pending' | 'approved' | 'changes-requested';
 export type AttachmentKind = 'evidence' | 'certificate';
+export type EnrollmentStatus = 'ongoing' | 'graduated';
 
 export interface TraineeProfile {
   id: string;
   name: string;
   email: string;
+  alternativeEmail: string | null;
   stage: string;
+  programType: 'student_attachment' | 'graduate_training';
+  enrollmentStatus: EnrollmentStatus;
 }
 
 export interface TrainingEntry {
@@ -23,6 +27,7 @@ export interface TrainingEntry {
   activity: string;
   hours: number;
   status: EntryStatus;
+  reviewInstructions: string | null;
   createdAt: string;
 }
 

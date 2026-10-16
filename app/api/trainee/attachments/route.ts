@@ -214,7 +214,7 @@ export async function GET(request: NextRequest) {
          AND (
            ( $2 = 'trainee' AND attachment.trainee_id = $3 )
            OR
-           ( $2 = 'mentor' AND EXISTS (
+           ( $2 = 'qualified_architect' AND EXISTS (
              SELECT 1
              FROM mentor_assignments assignment
              WHERE assignment.trainee_id = attachment.trainee_id

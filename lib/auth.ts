@@ -5,7 +5,7 @@ import type { NextRequest, NextResponse } from 'next/server';
 import type { PoolClient } from 'pg';
 import { getDatabase } from './database';
 
-export type UserRole = 'trainee' | 'mentor';
+export type UserRole = 'trainee' | 'qualified_architect' | 'university_admin' | 'board_admin';
 
 export interface AuthenticatedUser {
   id: string;
@@ -13,10 +13,17 @@ export interface AuthenticatedUser {
   email: string;
   role: UserRole;
   universityAdmin: boolean;
+  boardAdmin: boolean;
+  universityTenantId: string | null;
 }
 
 export const SESSION_COOKIE = 'archpath_session';
 export const SESSION_DURATION_SECONDS = 7 * 24 * 60 * 60;
+
+export function hasUniversityAdminAccess(role: UserRole, email: string): boolean {
+  const configuredEmail = process.env.UNIVERSITY_ADMIN_EMAIL?.trim().toLowerCase();
+  return role === 'university_admin' || Boolean(configuredEmail && email.toLowerCase() === configuredEmail);
+}
 
 function signingKey(): Uint8Array {
   const secret = process.env.JWT_SECRET;
@@ -69,10 +76,9 @@ export function clearSessionCookie(response: NextResponse): void {
   });
 }
 
-export async function getAuthenticatedUser(
-  request: NextRequest,
+export async function getAuthenticatedUserFromToken(
+  token: string | undefined,
 ): Promise<AuthenticatedUser | null> {
-  const token = request.cookies.get(SESSION_COOKIE)?.value;
   if (!token) return null;
 
   const key = signingKey();
@@ -90,7 +96,10 @@ export async function getAuthenticatedUser(
   if (
     typeof sessionId !== 'string' ||
     typeof userId !== 'string' ||
-    (payload.role !== 'trainee' && payload.role !== 'mentor')
+    (payload.role !== 'trainee' &&
+      payload.role !== 'qualified_architect' &&
+      payload.role !== 'university_admin' &&
+      payload.role !== 'board_admin')
   ) {
     return null;
   }
@@ -100,8 +109,9 @@ export async function getAuthenticatedUser(
     name: string;
     email: string;
     role: UserRole;
+    university_tenant_id: string | null;
   }>(
-    `SELECT u.id, u.name, u.email, u.role
+    `SELECT u.id, u.name, u.email, u.role, u.university_tenant_id
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.id = $1
@@ -114,10 +124,16 @@ export async function getAuthenticatedUser(
   if (!user || user.role !== payload.role) return null;
   return {
     ...user,
-    universityAdmin:
-      Boolean(process.env.UNIVERSITY_ADMIN_EMAIL) &&
-      user.email.toLowerCase() === process.env.UNIVERSITY_ADMIN_EMAIL?.trim().toLowerCase(),
+    universityAdmin: hasUniversityAdminAccess(user.role, user.email),
+    boardAdmin: user.role === 'board_admin',
+    universityTenantId: user.university_tenant_id,
   };
+}
+
+export async function getAuthenticatedUser(
+  request: NextRequest,
+): Promise<AuthenticatedUser | null> {
+  return getAuthenticatedUserFromToken(request.cookies.get(SESSION_COOKIE)?.value);
 }
 
 export async function revokeSession(request: NextRequest): Promise<void> {
